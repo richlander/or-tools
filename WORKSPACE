@@ -156,7 +156,43 @@ cc_library(
 
 git_repository(
     name = "highs",
-    branch = "v1.7.0",
+    #branch = "master",
+    #tag = "v1.7.0", # FAILED
+    #tag = "v1.5.3", # FAILED
+    #tag = "v1.5.1", # FAILED
+    #commit = "387fcf926f459ea480053f5b0f4f2aef59a9586c", # 2023-01-03 FAILED
+    #commit = "488059f92f0df752f8a411be6bd30b2141d0552b", # 2022-12-24 FAILED
+    #commit = "4a22da667e90a38373baf04bb259f8a2332a9d3f", # 2022-12-22 FAILED
+    #commit = "6f28a305366f5f53438f9a9e72c025fdf2c550f3", # 2022-12-21 FAILED
+    #commit = "e0ed5b019109dc76fc6ffaf7962843cbf6de0961", # 2022-12-21 FAILED
+    #commit = "61b7dccf1ae8b9f46edf54ad1ca2cb416a273e9c", # 2022-12-17 OK
+    #commit = "fd49112140bf8c2ff79312e91423b798be6d6276", # 2022-12-17 OK
+    #commit = "4ebb25d4b1e21addaf48fb0e4c8dd0bca04efff6", # 2022-12-15 OK
+    #tag = "v1.4.2", # PASSED
+    #tag = "v1.4.1", # PASSED
+
+    # try to follow parent historic from "e0ed5b019109dc76fc6ffaf7962843cbf6de0961"
+    #commit = "cae9617de4635aeb3546bc9791831c5e6103132e", # FAILED
+    #commit = "7a943048b9d0e65cad80de5159eb43b6ff446b1e", # FAILED prt cae
+    #commit = "05dfb8553d2a98a6db04f6686e56c8958185989b", # PASSED prt cae
+
+    #commit = "316c825f9433de9bf8c73e1baa2a7734d77bd4af", # FAILED prt 7a94
+    #commit = "262990724218f025edd5b106db78276e8bef90aa", # PASSED prt 7a94
+
+    #commit = "daed8b7ac47364f74c17cdd8eb11bfa94b4575ac", # FAILED prt 316
+    #commit = "5acb9c64e79d4c7c14c9db008bc1dc923d537ee5", # FAILED prt 316
+
+    #commit = "62763d711e98c6f065d79e22885ef9c9da475a78", # PASSED
+
+    #commit = "bc7f2a2ce8089153f0daddb5559eb1e19fbf73d9", # PASSED
+    commit = "e9f424f640de18fba71931a009a8423a0d9b9b54", # FAILED
+
+    #commit = "e5ea838483861867905fc8964442fe1fd176e85d", # PASSED
+    #commit = "abff61b5a33746c4c9b6b59b08bb1a0455b8b23c", # PASSED
+    #commit = "3549dda16a38dd0570e40c3872607c9cd733383c", # PASSED
+
+    #patches = ["highs.patch"],
+    #patch_args = ["-p1"],
     remote = "https://github.com/ERGO-Code/HiGHS.git",
 )
 

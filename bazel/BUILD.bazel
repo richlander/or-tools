@@ -23,7 +23,7 @@ exports_files([
     "ortools_requirements.in",
     "ortools_requirements.txt",
     "pcre2.BUILD.bazel",
-    "scip-v900.patch",
+    "scip-v910.patch",
     "scip.BUILD.bazel",
     "swig.BUILD.bazel",
     "swig.patch",

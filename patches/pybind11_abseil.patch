@@ -5,6 +5,18 @@ index 0000000..378eac2
 +++ b/.bazelignore
 @@ -0,0 +1 @@
 +build
+diff --git a/.github/workflows/actions.yml b/.github/workflows/actions.yml
+index 12fe458..b30c028 100644
+--- a/.github/workflows/actions.yml
++++ b/.github/workflows/actions.yml
+@@ -18,6 +18,7 @@ jobs:
+ 
+   unix:
+     strategy:
++      fail-fast: false
+       matrix:
+         runs-on: [ubuntu-latest]
+         build_tool: [bazel, cmake]
 diff --git a/.gitignore b/.gitignore
 index 2a7b42e..c2a37f0 100644
 --- a/.gitignore
@@ -15,11 +27,12 @@ index 2a7b42e..c2a37f0 100644
  tmp_build
 +.*.swp
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index ceb65a8..e142837 100644
+index ceb65a8..2a78f8b 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -1,14 +1,11 @@
- cmake_minimum_required(VERSION 3.11)
+-cmake_minimum_required(VERSION 3.11)
++cmake_minimum_required(VERSION 3.16)
  project(pybind11_abseil LANGUAGES CXX)
  
 -include(FetchContent)
@@ -53,30 +66,275 @@ index ceb65a8..e142837 100644
  
  set(TOP_LEVEL_DIR ${CMAKE_CURRENT_LIST_DIR})
  include_directories(${TOP_LEVEL_DIR} ${pybind11_INCLUDE_DIRS})
+diff --git a/MODULE.bazel b/MODULE.bazel
+index cb75dd1..bd551a2 100644
+--- a/MODULE.bazel
++++ b/MODULE.bazel
+@@ -1,38 +1,18 @@
++PYBIND11_ABSEIL_VERSION = "20240722.0"
++
+ module(
+     name = "pybind11_abseil",
+-    version = "head",
+-)
+-
+-bazel_dep(
+-    name = "bazel_skylib",
+-    version = "1.5.0",
+-)
+-
+-bazel_dep(
+-    name = "abseil-cpp",
+-    version = "20240116.0",
+-    repo_name = "com_google_absl",
+-)
+-
+-bazel_dep(
+-    name = "rules_cc",
+-    version = "0.0.9",
+-)
+-
+-bazel_dep(
+-    name = "rules_python",
+-    version = "0.31.0",
++    version = PYBIND11_ABSEIL_VERSION,
++    repo_name = "org_pybind11_abseil",
+ )
+ 
+-bazel_dep(
+-    name = "platforms",
+-    version = "0.0.8"
+-)
+-
+-bazel_dep(
+-    name = "pybind11_bazel",
+-    version = "2.11.1.bzl.2"
+-)
++# see https://registry.bazel.build/
++bazel_dep(name = "abseil-cpp", version = "20240722.0", repo_name = "com_google_absl")
++bazel_dep(name = "bazel_skylib", version = "1.7.1")
++bazel_dep(name = "platforms", version = "0.0.10")
++bazel_dep(name = "rules_cc", version = "0.0.16")
++bazel_dep(name = "rules_python", version = "0.40.0")
++bazel_dep(name = "pybind11_bazel", version = "2.13.6")
+ 
+ #### DEV ONLY DEPENDENCIES BELOW HERE ####
+ 
+@@ -49,6 +29,7 @@ DEFAULT_PYTHON = "3.11"
+ python = use_extension("@rules_python//python/extensions:python.bzl", "python", dev_dependency=True)
+ [
+   python.toolchain(
++    ignore_root_user_error = True,  # needed for CI
+     python_version = version,
+     is_default = version == DEFAULT_PYTHON,
+   )
+diff --git a/README.md b/README.md
+index 58bbc94..84d5345 100644
+--- a/README.md
++++ b/README.md
+@@ -53,15 +53,15 @@ http_archive(
+ 
+ http_archive(
+   name = "pybind11",
+-  build_file = "@pybind11_bazel//:pybind11.BUILD",
++  build_file = "@pybind11_bazel//:pybind11-BUILD.bazel",
+   strip_prefix = "pybind11-master",
+   urls = ["https://github.com/pybind/pybind11/archive/refs/heads/master.tar.gz"],
+ )
+ 
+ http_archive(
+   name = "pybind11_abseil",
+-  strip_prefix = "pybind11_abseil_master"
+-  urls = ["https://github.com/pybind/pybind11_abseil/refs/heads/master.tar.gz"],
++  strip_prefix = "pybind11_abseil-master",
++  urls = ["https://github.com/pybind/pybind11_abseil/archive/refs/heads/master.tar.gz"],
+ )
+ 
+ ```
+@@ -83,14 +83,15 @@ http_archive(
+ 
+ http_archive(
+   name = "pybind11",
+-  build_file = "@pybind11_bazel//:pybind11.BUILD",
++  build_file = "@pybind11_bazel//:pybind11-BUILD.bazel",
+   strip_prefix = "pybind11-master",
++  urls = ["https://github.com/pybind/pybind11/archive/refs/heads/master.tar.gz"],
+ )
+ 
+ http_archive(
+   name = "pybind11_abseil",
+-  strip_prefix = "pybind11_abseil_master",
+-  urls = ["https://github.com/pybind/pybind11_abseil/refs/heads/master.tar.gz"],
++  strip_prefix = "pybind11_abseil-master",
++  urls = ["https://github.com/pybind/pybind11_abseil/archive/refs/heads/master.tar.gz"],
+ )
+ ```
+ 
+diff --git a/WORKSPACE b/WORKSPACE
+index 073250c..704d5d7 100644
+--- a/WORKSPACE
++++ b/WORKSPACE
+@@ -1,44 +1,54 @@
+ workspace(name = "com_google_pybind11_abseil")
+-load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+-
+-# To update a PINNED dependency to a new revision,
+-# a) update URL and strip_prefix to the new git commit hash
+-# b) get the sha256 hash of the commit by running:
+-#    curl -L https://github.com/<...>.tar.gz | sha256sum
+-#    On Mac, run curl -L https://github.com/<...>.tar.gz | shasum -a 256
+-#    and update the sha256 with the result.
++load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository", "new_git_repository")
+ 
+ ################################################################################
+ #
+-# WORKSPACE is being deprecated in favor of the new Bazelmod dependency system
++# WORKSPACE is being deprecated in favor of the new Bzlmod dependency system.
+ # It will be removed at some point in the future.
+ #
+ ################################################################################
+ 
+-## `bazel_skylib` (PINNED)
+-http_archive(
+-    name = "bazel_skylib",  # 2023-05-31T19:24:07Z
+-    sha256 = "08c0386f45821ce246bbbf77503c973246ed6ee5c3463e41efc197fa9bc3a7f4",
+-    strip_prefix = "bazel-skylib-288731ef9f7f688932bd50e704a91a45ec185f9b",
+-    urls = ["https://github.com/bazelbuild/bazel-skylib/archive/288731ef9f7f688932bd50e704a91a45ec185f9b.zip"],
++## `bazel_skylib`
++# Needed for Abseil.
++git_repository(
++    name = "bazel_skylib",
++    commit = "27d429d8d036af3d010be837cc5924de1ca8d163",
++    #tag = "1.7.1",
++    remote = "https://github.com/bazelbuild/bazel-skylib.git",
++)
++load("@bazel_skylib//:workspace.bzl", "bazel_skylib_workspace")
++bazel_skylib_workspace()
++
++## Bazel rules...
++git_repository(
++    name = "platforms",
++    commit = "05ec3a3df23fde62471f8288e344cc021dd87bab",
++    #tag = "0.0.10",
++    remote = "https://github.com/bazelbuild/platforms.git",
+ )
+ 
+-## `abseil-cpp` (PINNED)
++git_repository(
++    name = "rules_cc",
++    commit = "fe7ca631abefced2830a4b18e5d29eb3f1d82013",
++    #tag = "0.0.16",
++    remote = "https://github.com/bazelbuild/rules_cc.git",
++)
++
++## `abseil-cpp`
+ # https://github.com/abseil/abseil-cpp
+-http_archive(
++## Abseil-cpp
++git_repository(
+     name = "com_google_absl",
+-    sha256 = "59d2976af9d6ecf001a81a35749a6e551a335b949d34918cfade07737b9d93c5",  # SHARED_ABSL_SHA
+-    strip_prefix = "abseil-cpp-20230802.0",
+-    urls = [
+-        "https://github.com/abseil/abseil-cpp/archive/refs/tags/20230802.0.tar.gz"
+-    ],
++    commit = "4447c7562e3bc702ade25105912dce503f0c4010",
++    #tag = "20240722.0",
++    remote = "https://github.com/abseil/abseil-cpp.git",
+ )
+ 
+-http_archive(
++git_repository(
+     name = "rules_python",
+-    sha256 = "c68bdc4fbec25de5b5493b8819cfc877c4ea299c0dcb15c244c5a00208cde311",
+-    strip_prefix = "rules_python-0.31.0",
+-    url = "https://github.com/bazelbuild/rules_python/releases/download/0.31.0/rules_python-0.31.0.tar.gz",
++    commit = "1944874f6ba507f70d8c5e70df84622e0c783254",
++    #tag = "0.40.0",
++    remote = "https://github.com/bazelbuild/rules_python.git",
+ )
+ 
+ load("@rules_python//python:repositories.bzl", "py_repositories", "python_register_multi_toolchains")
+@@ -89,28 +99,21 @@ load("@pypi//:requirements.bzl", "install_deps")
+ install_deps()
+ 
+ 
+-## `pybind11_bazel` (FLOATING)
++## `pybind11_bazel`
+ # https://github.com/pybind/pybind11_bazel
+-http_archive(
+-  name = "pybind11_bazel",
+-  strip_prefix = "pybind11_bazel-master",
+-  urls = ["https://github.com/pybind/pybind11_bazel/archive/refs/heads/master.tar.gz"],
++git_repository(
++    name = "pybind11_bazel",
++    commit = "2b6082a4d9d163a52299718113fa41e4b7978db5",
++    #tag = "v2.13.6", # 2024/10/21
++    remote = "https://github.com/pybind/pybind11_bazel.git",
+ )
+ 
+-## `pybind11` (FLOATING)
++## `pybind11`
+ # https://github.com/pybind/pybind11
+-http_archive(
+-  name = "pybind11",
+-  build_file = "@pybind11_bazel//:pybind11.BUILD",
+-  strip_prefix = "pybind11-master",
+-  urls = ["https://github.com/pybind/pybind11/archive/refs/heads/master.tar.gz"],
+-  # For easy local testing with pybind11 releases:
+-  #   * Comment out the 2 lines above.
+-  #   * Uncomment and update the 3 lines below.
+-  #   * To compute the sha256 string:
+-  #       * Download the .tar.gz file (e.g. curl or wget).
+-  #       * sha256sum v2.10.4.tar.gz
+-  # strip_prefix = "pybind11-2.10.4",
+-  # sha256 = "832e2f309c57da9c1e6d4542dedd34b24e4192ecb4d62f6f4866a737454c9970",
+-  # urls = ["https://github.com/pybind/pybind11/archive/refs/tags/v2.10.4.tar.gz"],
++new_git_repository(
++    name = "pybind11",
++    build_file = "@pybind11_bazel//:pybind11-BUILD.bazel",
++    commit = "a2e59f0e7065404b44dfe92a28aca47ba1378dc4",
++    #tag = "v2.13.6",
++    remote = "https://github.com/pybind/pybind11.git",
+ )
 diff --git a/cmake/dependencies/CMakeLists.txt b/cmake/dependencies/CMakeLists.txt
 new file mode 100644
-index 0000000..cb13e7e
+index 0000000..b59e6d8
 --- /dev/null
 +++ b/cmake/dependencies/CMakeLists.txt
-@@ -0,0 +1,19 @@
+@@ -0,0 +1,33 @@
 +include(FetchContent)
 +set(BUILD_TESTING OFF)
 +
 +if(NOT TARGET absl::base)
++  message(CHECK_START "Fetching Abseil-cpp")
++  list(APPEND CMAKE_MESSAGE_INDENT "  ")
++  # ensure that abseil also installs itself, since we are using it in our public API
++  set(ABSL_ENABLE_INSTALL ON)
++  set(ABSL_USE_SYSTEM_INCLUDES ON)
 +  set(ABSL_PROPAGATE_CXX_STD ON)
++  set(ABSL_BUILD_TESTING OFF)
 +  FetchContent_Declare(
 +    absl
-+    URL https://github.com/abseil/abseil-cpp/archive/refs/tags/20230802.0.tar.gz
-+    URL_HASH
-+    SHA256=59d2976af9d6ecf001a81a35749a6e551a335b949d34918cfade07737b9d93c5)
++    GIT_REPOSITORY "https://github.com/abseil/abseil-cpp.git"
++    GIT_TAG "20240722.0"
++    GIT_SHALLOW TRUE)
 +  FetchContent_MakeAvailable(absl)
++  list(POP_BACK CMAKE_MESSAGE_INDENT)
++  message(CHECK_PASS "fetched")
 +endif()
 +
 +if(NOT TARGET pybind11::pybind11_headers)
++  message(CHECK_START "Fetching Pybind11")
++  list(APPEND CMAKE_MESSAGE_INDENT "  ")
 +  FetchContent_Declare(
 +    pybind11
-+    URL https://github.com/pybind/pybind11/archive/refs/heads/master.tar.gz)
++    GIT_REPOSITORY "https://github.com/pybind/pybind11.git"
++    GIT_TAG "v2.13.6"
++    GIT_SHALLOW TRUE)
 +  FetchContent_MakeAvailable(pybind11)
++  list(POP_BACK CMAKE_MESSAGE_INDENT)
++  message(CHECK_PASS "fetched")
 +endif()
 diff --git a/pybind11_abseil/BUILD b/pybind11_abseil/BUILD
 index 791c245..33e614a 100644
@@ -158,10 +416,10 @@ index 791c245..33e614a 100644
  )
  
 diff --git a/pybind11_abseil/CMakeLists.txt b/pybind11_abseil/CMakeLists.txt
-index d1b7483..74e3443 100644
+index d1b7483..826fe3a 100644
 --- a/pybind11_abseil/CMakeLists.txt
 +++ b/pybind11_abseil/CMakeLists.txt
-@@ -42,14 +42,19 @@ target_link_libraries(ok_status_singleton_pyinit_google3
+@@ -42,14 +42,17 @@ target_link_libraries(ok_status_singleton_pyinit_google3
  
  # ok_status_singleton =======================================================
  
@@ -172,8 +430,6 @@ index d1b7483..74e3443 100644
 +# note: macOS is APPLE and also UNIX !
 +if(APPLE)
 +  set_target_properties(ok_status_singleton PROPERTIES SUFFIX ".so")
-+  set_property(TARGET ok_status_singleton APPEND PROPERTY
-+    LINK_FLAGS "-flat_namespace -undefined suppress")
 +endif()
 +
  target_include_directories(ok_status_singleton
@@ -184,43 +440,40 @@ index d1b7483..74e3443 100644
  target_link_libraries(ok_status_singleton
                        PUBLIC ok_status_singleton_pyinit_google3)
  
-@@ -150,14 +155,30 @@ target_link_libraries(status_pyinit_google3 PUBLIC register_status_bindings)
+@@ -150,14 +153,27 @@ target_link_libraries(status_pyinit_google3 PUBLIC register_status_bindings)
  
  # status ====================================================================
  
 -add_library(status SHARED status_py_extension_stub.cc)
 -add_library(pybind11_abseil::status ALIAS status)
 +pybind11_add_module(status_py_extension_stub MODULE status_py_extension_stub.cc)
++set_target_properties(status_py_extension_stub PROPERTIES
++  LIBRARY_OUTPUT_NAME "status")
 +
-+set_target_properties(status_py_extension_stub PROPERTIES LIBRARY_OUTPUT_NAME "status")
 +# note: macOS is APPLE and also UNIX !
 +if(APPLE)
 +  set_target_properties(status_py_extension_stub PROPERTIES
 +    SUFFIX ".so"
-+    INSTALL_RPATH "@loader_path;@loader_path/../ortools/.libs"
-+  )
-+  set_property(TARGET status_py_extension_stub APPEND PROPERTY
-+    LINK_FLAGS "-flat_namespace -undefined suppress")
++    INSTALL_RPATH "@loader_path;@loader_path/../ortools/.libs")
 +elseif(UNIX)
 +  set_target_properties(status_py_extension_stub PROPERTIES
-+    INSTALL_RPATH "$ORIGIN:$ORIGIN/../ortools/.libs"
-+    )
++    INSTALL_RPATH "$ORIGIN:$ORIGIN/../ortools/.libs")
 +endif()
- 
--target_include_directories(status INTERFACE $<BUILD_INTERFACE:${TOP_LEVEL_DIR}>)
++
 +add_library(pybind11_abseil::status ALIAS status_py_extension_stub)
  
--set_target_properties(status PROPERTIES PREFIX "")
+-target_include_directories(status INTERFACE $<BUILD_INTERFACE:${TOP_LEVEL_DIR}>)
 +target_include_directories(status_py_extension_stub INTERFACE $<BUILD_INTERFACE:${TOP_LEVEL_DIR}>)
  
--target_link_libraries(status PUBLIC status_pyinit_google3 absl::status)
+-set_target_properties(status PROPERTIES PREFIX "")
 +set_target_properties(status_py_extension_stub PROPERTIES PREFIX "")
-+
+ 
+-target_link_libraries(status PUBLIC status_pyinit_google3 absl::status)
 +target_link_libraries(status_py_extension_stub PUBLIC status_pyinit_google3 absl::status)
  
  # import_status_module =========================================================
  
-@@ -167,7 +188,7 @@ add_library(pybind11_abseil::import_status_module ALIAS import_status_module)
+@@ -167,7 +183,7 @@ add_library(pybind11_abseil::import_status_module ALIAS import_status_module)
  target_include_directories(import_status_module
                             INTERFACE $<BUILD_INTERFACE:${TOP_LEVEL_DIR}>)
  
@@ -229,7 +482,7 @@ index d1b7483..74e3443 100644
  
  # status_casters ===============================================================
  
-@@ -175,25 +196,27 @@ add_library(status_casters INTERFACE)
+@@ -175,28 +191,29 @@ add_library(status_casters INTERFACE)
  add_library(pybind11_abseil::status_casters ALIAS status_casters)
  
  target_include_directories(status_casters
@@ -262,8 +515,124 @@ index d1b7483..74e3443 100644
      EXPORT pybind11_abseil_cppTargets
      LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
      ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+     RUNTIME DESTINATION ${CMAKE_INSTALL_LIBDIR})
+-
+ endif()
+diff --git a/pybind11_abseil/absl_casters.h b/pybind11_abseil/absl_casters.h
+index 7bda30f..a465f4a 100644
+--- a/pybind11_abseil/absl_casters.h
++++ b/pybind11_abseil/absl_casters.h
+@@ -42,6 +42,7 @@
+ #include <cmath>
+ #include <complex>
+ #include <cstdint>
++#include <cstring>
+ #include <tuple>
+ #include <type_traits>
+ #include <vector>
+@@ -494,7 +495,7 @@ struct type_caster<absl::Span<T>> {
+   }
+ 
+   static constexpr auto name =
+-      const_name("Span[") + make_caster<T>::name + const_name("]");
++      const_name("Sequence[") + make_caster<T>::name + const_name("]");
+ 
+   // We do not allow moving because 1) spans are super lightweight, so there's
+   // no advantage to moving and 2) the span cannot exist without the caster,
+@@ -627,9 +628,22 @@ struct type_caster<absl::Cord> {
+   }
+ 
+   // Conversion part 2 (C++ -> Python)
+-  static handle cast(const absl::Cord& src, return_value_policy /*policy*/,
++  static handle cast(const absl::Cord& src, return_value_policy policy,
+                      handle /*parent*/) {
+-    return bytes(std::string(src)).release();
++#if defined(PYBIND11_HAS_RETURN_VALUE_POLICY_CLIF_AUTOMATIC)
++    if (policy == return_value_policy::_clif_automatic) {
++      return str(std::string(src)).release();
++    }
++#endif
++    bytes data(nullptr, src.size());
++    // Cord::CopyToArray is not always available so we need to copy
++    // the cord manually.
++    char* ptr = PyBytes_AS_STRING(data.ptr());
++    for (absl::string_view chunk : src.Chunks()) {
++      std::memcpy(ptr, chunk.data(), chunk.size());
++      ptr += chunk.size();
++    }
++    return data.release();
+   }
+ };
+ 
+diff --git a/pybind11_abseil/compat/status_from_py_exc.cc b/pybind11_abseil/compat/status_from_py_exc.cc
+index dc38ef1..2bc6bf9 100644
+--- a/pybind11_abseil/compat/status_from_py_exc.cc
++++ b/pybind11_abseil/compat/status_from_py_exc.cc
+@@ -56,7 +56,7 @@ PyObject* PyStatusNotOkOrNone() {
+   static PyObject* kImportedObj = nullptr;
+   if (kImportedObj == nullptr) {
+     kImportedObj = py_base_utilities::ImportObjectOrReturnNone(
+-        "google3.third_party.pybind11_abseil.status", "StatusNotOk");
++        "pybind11_abseil.status", "StatusNotOk");
+   }
+   return kImportedObj;
+ }
+diff --git a/pybind11_abseil/status_caster.h b/pybind11_abseil/status_caster.h
+index eef6aba..00655b1 100644
+--- a/pybind11_abseil/status_caster.h
++++ b/pybind11_abseil/status_caster.h
+@@ -120,9 +120,8 @@ struct type_caster<absl::Status> : public type_caster_base<absl::Status> {
+   }
+ };
+ 
+-#if defined(PYBIND11_HAS_RETURN_VALUE_POLICY_PACK)
++#if defined(PYBIND11_HAS_TYPE_CASTER_STD_FUNCTION_SPECIALIZATIONS)
+ 
+-// This code requires https://github.com/google/pywrapcc
+ // IMPORTANT:
+ //     KEEP
+ //         type_caster<absl::Status>
+@@ -140,7 +139,11 @@ struct func_wrapper<absl::Status, Args...> : func_wrapper_base {
+     gil_scoped_acquire acq;
+     try {
+       object py_result =
++#if defined(PYBIND11_HAS_RETURN_VALUE_POLICY_PACK)
+           hfunc.f.call_with_policies(rvpp, std::forward<Args>(args)...);
++#else
++          hfunc.f(std::forward<Args>(args)...);
++#endif
+       try {
+         return py_result.template cast<absl::Status>();
+       } catch (cast_error& e) {
+diff --git a/pybind11_abseil/statusor_caster.h b/pybind11_abseil/statusor_caster.h
+index 80a1507..2dc97ba 100644
+--- a/pybind11_abseil/statusor_caster.h
++++ b/pybind11_abseil/statusor_caster.h
+@@ -124,9 +124,8 @@ struct type_caster<absl::StatusOr<PayloadType>> {
+   }
+ };
+ 
+-#if defined(PYBIND11_HAS_RETURN_VALUE_POLICY_PACK)
++#if defined(PYBIND11_HAS_TYPE_CASTER_STD_FUNCTION_SPECIALIZATIONS)
+ 
+-// This code requires https://github.com/google/pywrapcc
+ // IMPORTANT:
+ //     KEEP
+ //         type_caster<absl::StatusOr<PayloadType>>
+@@ -144,7 +143,11 @@ struct func_wrapper<absl::StatusOr<PayloadType>, Args...> : func_wrapper_base {
+     gil_scoped_acquire acq;
+     try {
+       object py_result =
++#if defined(PYBIND11_HAS_RETURN_VALUE_POLICY_PACK)
+           hfunc.f.call_with_policies(rvpp, std::forward<Args>(args)...);
++#else
++          hfunc.f(std::forward<Args>(args)...);
++#endif
+       try {
+         auto cpp_result =
+             py_result.template cast<absl::StatusOr<PayloadType>>();
 diff --git a/pybind11_abseil/tests/CMakeLists.txt b/pybind11_abseil/tests/CMakeLists.txt
-index a423c30..ae22a48 100644
+index a423c30..f7f390e 100644
 --- a/pybind11_abseil/tests/CMakeLists.txt
 +++ b/pybind11_abseil/tests/CMakeLists.txt
 @@ -1,6 +1,6 @@
@@ -301,3 +670,170 @@ index a423c30..ae22a48 100644
  
  target_link_libraries(status_example PRIVATE status_casters absl::status
                                               absl::statusor)
+@@ -95,3 +95,5 @@ add_test(
+     ${CMAKE_COMMAND} -E env PYTHONPATH=$PYTHONPATH:${CMAKE_BINARY_DIR}
+     ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/status_example_test.py
+   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
++
++# OMITTED (help appreciated): status_testing_no_cpp_eh_test
+diff --git a/pybind11_abseil/tests/absl_example.cc b/pybind11_abseil/tests/absl_example.cc
+index 91fdec4..576e5ca 100644
+--- a/pybind11_abseil/tests/absl_example.cc
++++ b/pybind11_abseil/tests/absl_example.cc
+@@ -363,6 +363,13 @@ static_assert(
+     !std::is_const<const int*>::value);  // int is const, pointer is not.
+ 
+ PYBIND11_MODULE(absl_example, m) {
++  m.attr("PYBIND11_HAS_RETURN_VALUE_POLICY_CLIF_AUTOMATIC") =
++#if defined(PYBIND11_HAS_RETURN_VALUE_POLICY_CLIF_AUTOMATIC)
++      true;
++#else
++      false;
++#endif
++
+   // absl::Time/Duration bindings.
+   m.def("make_duration", &MakeDuration, arg("secs"));
+   m.def("make_infinite_duration", &MakeInfiniteDuration);
+@@ -440,6 +447,11 @@ PYBIND11_MODULE(absl_example, m) {
+   // absl::Cord bindings.
+   m.def("check_absl_cord", &CheckAbslCord, arg("view"), arg("values"));
+   m.def("return_absl_cord", &ReturnAbslCord, arg("values"));
++#if defined(PYBIND11_HAS_RETURN_VALUE_POLICY_CLIF_AUTOMATIC)
++  m.def("return_absl_cord_clif_automatic", [](const std::string& values) {
++    return cast(ReturnAbslCord(values), return_value_policy::_clif_automatic);
++  });
++#endif
+ 
+   // absl::optional bindings.
+   m.def("check_optional", &CheckOptional, arg("optional") = absl::nullopt,
+diff --git a/pybind11_abseil/tests/absl_test.py b/pybind11_abseil/tests/absl_test.py
+index 555ad87..49a9ffd 100644
+--- a/pybind11_abseil/tests/absl_test.py
++++ b/pybind11_abseil/tests/absl_test.py
+@@ -377,7 +377,7 @@ class AbslNumericSpanTest(parameterized.TestCase):
+       ('read_only', make_read_only_numpy_array()),
+       ('strided_skip', make_strided_numpy_array(2)),
+       ('strided_reverse', make_strided_numpy_array(-1)),
+-      ('non_supported_type', np.zeros(5, dtype=np.unicode_)),
++      ('non_supported_type', np.zeros(5, dtype=np.str_)),
+       ('native_list', [0] * 5))
+   def test_fill_span_fails_from(self, values):
+     with self.assertRaises(TypeError):
+@@ -487,12 +487,24 @@ class AbslCordTest(absltest.TestCase):
+   TEST_STRING = 'absl_Cord'
+   TEST_BYTES = b'absl_Cord'
+ 
+-  def test_return_absl_cord(self):
++  def test_return_absl_cord_rvp_not_specified(self):
+     self.assertSequenceEqual(
+         absl_example.return_absl_cord(self.TEST_STRING), self.TEST_BYTES)
+     self.assertSequenceEqual(
+         absl_example.return_absl_cord(self.TEST_BYTES), self.TEST_BYTES)
+ 
++  def test_return_absl_cord_rvp_clif_automatic(self):
++    if not absl_example.PYBIND11_HAS_RETURN_VALUE_POLICY_CLIF_AUTOMATIC:
++      self.skipTest('return_value_policy::_clif_automatic not available')
++    self.assertSequenceEqual(
++        absl_example.return_absl_cord_clif_automatic(self.TEST_STRING),
++        self.TEST_STRING,
++    )
++    self.assertSequenceEqual(
++        absl_example.return_absl_cord_clif_automatic(self.TEST_BYTES),
++        self.TEST_STRING,
++    )
++
+   def test_pass_absl_cord(self):
+     self.assertTrue(
+         absl_example.check_absl_cord(self.TEST_STRING, self.TEST_STRING))
+diff --git a/pybind11_abseil/tests/status_testing_no_cpp_eh_pybind.cc b/pybind11_abseil/tests/status_testing_no_cpp_eh_pybind.cc
+index 27be2cf..b441962 100644
+--- a/pybind11_abseil/tests/status_testing_no_cpp_eh_pybind.cc
++++ b/pybind11_abseil/tests/status_testing_no_cpp_eh_pybind.cc
+@@ -24,8 +24,8 @@ PYBIND11_MODULE(status_testing_no_cpp_eh_pybind, m) {
+         pybind11::return_value_policy::take_ownership);
+   m.def("GenerateErrorStatusNotOk", &GenerateErrorStatusNotOk);
+ 
+-  m.attr("PYBIND11_HAS_RETURN_VALUE_POLICY_PACK") =
+-#if defined(PYBIND11_HAS_RETURN_VALUE_POLICY_PACK)
++  m.attr("defined_PYBIND11_HAS_TYPE_CASTER_STD_FUNCTION_SPECIALIZATIONS") =
++#if defined(PYBIND11_HAS_TYPE_CASTER_STD_FUNCTION_SPECIALIZATIONS)
+       true;
+ #else
+       false;
+diff --git a/pybind11_abseil/tests/status_testing_no_cpp_eh_test.py b/pybind11_abseil/tests/status_testing_no_cpp_eh_test.py
+index fd78a5c..ed875bf 100644
+--- a/pybind11_abseil/tests/status_testing_no_cpp_eh_test.py
++++ b/pybind11_abseil/tests/status_testing_no_cpp_eh_test.py
+@@ -3,6 +3,13 @@ from absl.testing import absltest
+ from pybind11_abseil.tests import status_testing_no_cpp_eh_pybind
+ from pybind11_abseil.tests import status_testing_no_cpp_eh_test_lib as test_lib
+ 
++_HAS_FUN_SPEC = (
++    status_testing_no_cpp_eh_pybind.defined_PYBIND11_HAS_TYPE_CASTER_STD_FUNCTION_SPECIALIZATIONS
++)
++_FUN_SPEC_NDEF = (
++    'PYBIND11_HAS_TYPE_CASTER_STD_FUNCTION_SPECIALIZATIONS is not defined.'
++)
++
+ 
+ class _TestModuleMixin:
+ 
+@@ -10,14 +17,17 @@ class _TestModuleMixin:
+     return status_testing_no_cpp_eh_pybind
+ 
+ 
++@absltest.skipIf(not _HAS_FUN_SPEC, _FUN_SPEC_NDEF)
+ class StatusReturnTest(test_lib.StatusReturnTest, _TestModuleMixin):
+   pass
+ 
+ 
++@absltest.skipIf(not _HAS_FUN_SPEC, _FUN_SPEC_NDEF)
+ class StatusOrReturnTest(test_lib.StatusOrReturnTest, _TestModuleMixin):
+   pass
+ 
+ 
++@absltest.skipIf(not _HAS_FUN_SPEC, _FUN_SPEC_NDEF)
+ class StatusOrPyObjectPtrTest(
+     test_lib.StatusOrPyObjectPtrTest, _TestModuleMixin
+ ):
+diff --git a/pybind11_abseil/tests/status_testing_no_cpp_eh_test_lib.py b/pybind11_abseil/tests/status_testing_no_cpp_eh_test_lib.py
+index 5f9e7cd..5068716 100644
+--- a/pybind11_abseil/tests/status_testing_no_cpp_eh_test_lib.py
++++ b/pybind11_abseil/tests/status_testing_no_cpp_eh_test_lib.py
+@@ -53,10 +53,10 @@ class StatusReturnTest(parameterized.TestCase):
+       expected = 'OK'
+     else:
+       expected = (
+-          'INVALID_ARGUMENT: Unable to cast Python instance of type <class'
+-          " 'list'> to C++ type 'absl::Status'"
++          r"INVALID_ARGUMENT: Unable to cast Python instance of type <class"
++          r" 'list'> to C\+\+ type ('absl::(\w*::)?Status'|'\?')"
+       )
+-    self.assertEqual(self.tm.CallCallbackWithStatusReturn(cb), expected)
++    self.assertRegex(self.tm.CallCallbackWithStatusReturn(cb), expected)
+ 
+   def testAssertionErrorBare(self):  # pylint: disable=invalid-name
+ 
+@@ -117,10 +117,10 @@ class StatusOrReturnTest(parameterized.TestCase):
+       expected = 'INVALID_ARGUMENT: TypeError: expecting int'
+     else:
+       expected = (
+-          'INVALID_ARGUMENT: Unable to cast Python instance of type <class'
+-          " 'str'> to C++ type 'absl::StatusOr<int>'"
++          r"INVALID_ARGUMENT: Unable to cast Python instance of type <class"
++          r" 'str'> to C\+\+ type ('absl::(\w*::)?StatusOr<int>'|'\?')"
+       )
+-    self.assertEqual(self.tm.CallCallbackWithStatusOrIntReturn(cb), expected)
++    self.assertRegex(self.tm.CallCallbackWithStatusOrIntReturn(cb), expected)
+ 
+ 
+ class StatusOrPyObjectPtrTest(absltest.TestCase):
+@@ -185,7 +185,7 @@ class StatusOrPyObjectPtrTest(absltest.TestCase):
+ 
+     if (
+         hasattr(self.tm, '__pyclif_codegen_mode__')
+-        or self.tm.PYBIND11_HAS_RETURN_VALUE_POLICY_PACK
++        or self.tm.defined_PYBIND11_HAS_TYPE_CASTER_STD_FUNCTION_SPECIALIZATIONS
+     ):
+       res = cc_fn(cb, 'exc')
+       self.assertEqual(res, "!obj.ok()@ValueError: Unknown arg: 'exc'")
